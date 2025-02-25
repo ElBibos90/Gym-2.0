@@ -326,12 +326,12 @@ export const useWorkoutLogic = (api, user, mode, initialWorkout, onClose, onSucc
     };
 
     const handleDelete = useCallback(async () => {
-        if (!initialWorkout) return;
+        if (!initialWorkout?.scheda_id) return;
         
         try {
             setSaving(true);
             setError(null);
-
+    
             console.log("Deleting workout:", initialWorkout);
             
             // Conferma esplicita prima dell'eliminazione
@@ -340,21 +340,13 @@ export const useWorkoutLogic = (api, user, mode, initialWorkout, onClose, onSucc
                 setSaving(false);
                 return;
             }
-
-            // Verifica che abbiamo tutti i dati necessari
-            if (!initialWorkout.id) {
-                throw new Error('ID assegnazione mancante');
-            }
-
-            // Prima elimina l'assegnazione
-            console.log(`Deleting assignment with ID: ${initialWorkout.id}`);
-            await debugRequest(`/user_assignments.php?id=${initialWorkout.id}`, 'DELETE');
+    
+            // Elimina prima la scheda
+            console.log(`Deleting workout with ID: ${initialWorkout.scheda_id}`);
+            await api.delete(`/schede.php?id=${initialWorkout.scheda_id}`);
             
-            console.log("Assignment deletion successful");
-            
-            // Non eliminiamo più la scheda stessa, solo l'assegnazione
-            // Questo evita problemi con altre assegnazioni della stessa scheda
-            
+            console.log("Workout deletion successful");
+                
             // Notifica il successo e chiudi
             if (onSuccess) onSuccess();
             onClose();
@@ -369,7 +361,7 @@ export const useWorkoutLogic = (api, user, mode, initialWorkout, onClose, onSucc
         } finally {
             setSaving(false);
         }
-    }, [api, initialWorkout, onClose, onSuccess, debugRequest]);
+    }, [api, initialWorkout, onClose, onSuccess]);
 
     return {
         availableExercises,

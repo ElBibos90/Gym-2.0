@@ -3,6 +3,7 @@ import {
     Edit, Trash2, UserCog, Dumbbell,
     Plus, X, ChevronDown, ChevronRight
 } from 'lucide-react';
+import { useAuth } from '../AuthContext';  // Aggiungi questa importazione
 import PermissionsManager from './PermissionsManager';
 
 const UserCard = ({
@@ -11,18 +12,31 @@ const UserCard = ({
     onDelete,
     onManageWorkouts,
 }) => {
+    const { getAuthenticatedApi } = useAuth();  // Ottieni getAuthenticatedApi da useAuth
     const [isExpanded, setIsExpanded] = useState(false);
     const [showPermissions, setShowPermissions] = useState(false);
 
     // Handler per la rimozione della scheda
-    const handleRemoveWorkout = (e, user, workout) => {
+    const handleRemoveWorkout = async (e, user, workout) => {
         e.preventDefault();
         e.stopPropagation();
         
-        if (workout && workout.id) {
-            const confirmDelete = window.confirm('Sei sicuro di voler eliminare questa scheda?');
-            if (confirmDelete) {
-                onManageWorkouts(user, 'delete', workout);
+        if (!workout || !workout.scheda_id) {
+            console.error('Invalid workout data:', workout);
+            return;
+        }
+
+        const confirmDelete = window.confirm('Sei sicuro di voler eliminare questa scheda?');
+        if (confirmDelete) {
+            try {
+                const api = getAuthenticatedApi();
+                await api.delete(`/schede.php?id=${workout.scheda_id}`);
+                
+                // Ricarica la pagina per aggiornare la lista
+                window.location.reload();
+            } catch (err) {
+                console.error('Error deleting workout:', err);
+                alert('Errore durante l\'eliminazione della scheda');
             }
         }
     };
@@ -148,13 +162,13 @@ const UserCard = ({
                                                 <Edit className="h-4 w-4" />
                                             </button>
                                             <button
-                                                onClick={(e) => handleRemoveWorkout(e, user, workout)}
-                                                className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
-                                                title="Rimuovi scheda"
-                                                type="button"
-                                            >
-                                                <X className="h-4 w-4" />
-                                            </button>
+                onClick={(e) => handleRemoveWorkout(e, user, workout)}
+                className="p-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300"
+                title="Rimuovi scheda"
+                type="button"
+            >
+                <X className="h-4 w-4" />
+            </button>
                                         </div>
                                     </div>
                                 ))}
