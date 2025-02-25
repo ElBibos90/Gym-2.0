@@ -70,12 +70,24 @@ const SortableExerciseList = ({
       set_type: value
     };
     
+    // Gestione superset: quando un esercizio diventa superset, 
+    // l'esercizio successivo dovrebbe essere collegato ad esso
     if (value === 'superset' && index < exercises.length - 1) {
       newExercises[index + 1] = {
         ...newExercises[index + 1],
         linked_to_previous: true
       };
-    } else if (exercises[index].linked_to_previous) {
+    } 
+    // Se cambiamo da superset a qualcos'altro, rimuovi il collegamento dall'esercizio successivo
+    else if (exercises[index].set_type === 'superset' && value !== 'superset' && index < exercises.length - 1) {
+      newExercises[index + 1] = {
+        ...newExercises[index + 1],
+        linked_to_previous: false
+      };
+    }
+    
+    // Se questo esercizio era collegato al precedente ma ora è un tipo che non dovrebbe essere collegato
+    if (exercises[index].linked_to_previous) {
       newExercises[index] = {
         ...newExercises[index],
         linked_to_previous: false

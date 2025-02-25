@@ -1,11 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ChevronDown, ChevronUp, Plus, Check, RotateCw, Clock } from 'lucide-react';
 import RestTimer from './RestTimer';
 import InfoDialog from './InfoDialog';
 
-const ExerciseProgress = ({ exercise, exerciseHistory, serieCompletate = [], onSerieComplete, onTimerComplete }) => {
+const ExerciseProgress = ({ 
+    exercise, 
+    exerciseHistory, 
+    serieCompletate = [], 
+    onSerieComplete, 
+    onTimerComplete,
+    getRecoveryTime, // Nuovo parametro per ottenere il tempo di recupero personalizzato
+    setTypeName,     // Nome del tipo di set per visualizzazione
+    isLinkedToPrevious // Se questo esercizio è collegato al precedente (per superset)
+}) => {
     const [currentWeight, setCurrentWeight] = useState(exercise.peso || 0);
     const [currentReps, setCurrentReps] = useState(exercise.ripetizioni);
     const [showTimer, setShowTimer] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
     
     // Debug logs per tracciare i dati ricevuti
     useEffect(() => {
@@ -62,7 +74,16 @@ const ExerciseProgress = ({ exercise, exerciseHistory, serieCompletate = [], onS
         }
         
         onSerieComplete(newSerie);
-        setShowTimer(true);
+        
+        // Ottieni il tempo di recupero personalizzato se disponibile
+        const recoveryTime = getRecoveryTime ? getRecoveryTime() : exercise.tempo_recupero || 90;
+        
+        if (recoveryTime > 0) {
+            setShowTimer(true);
+        } else {
+            // Se il recupero è zero (come nei superset), notifica immediatamente il completamento
+            if (onTimerComplete) onTimerComplete();
+        }
     };
 
     // Gestisce il completamento del timer
@@ -71,12 +92,8 @@ const ExerciseProgress = ({ exercise, exerciseHistory, serieCompletate = [], onS
             console.log(`[${exercise.nome}] Timer completed`);
         }
         
-        // Semplicemente nascondiamo il timer
+        // Nascondi il timer
         setShowTimer(false);
-        
-        // NESSUNA LOGICA DI NASCONDIMENTO QUI
-        // Lasciamo che sia il componente parent a gestire 
-        // quando nascondere un esercizio completato
         
         // Informa il parent che il timer è completato
         if (onTimerComplete) {
@@ -85,15 +102,27 @@ const ExerciseProgress = ({ exercise, exerciseHistory, serieCompletate = [], onS
     };
 
     const lastWeight = getLastWeight();
+    
+    // Classe CSS aggiuntiva per gli esercizi collegati
+    const containerClass = `bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-4 transition-colors ${
+        isLinkedToPrevious ? 'border-t-2 border-blue-500' : ''
+    }`;
 
     return (
-        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow mb-4 transition-colors">
-            <div className="flex justify-between items-start mb-4">
+        <div className={containerClass}>
+            <div className="flex justify-between items-start mb-4" onClick={() => setIsExpanded(!isExpanded)}>
                 <div className="flex items-center gap-2">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                         {exercise.nome}
                     </h3>
                     <InfoDialog exercise={exercise} />
+                    
+                    {/* Badge per il tipo di set */}
+                    {setTypeName && exercise.set_type !== 'normal' && (
+                        <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded-full">
+                            {setTypeName}
+                        </span>
+                    )}
                 </div>
                 <div className="text-right">
                     <p className="text-sm text-gray-900 dark:text-white">
@@ -116,6 +145,45 @@ const ExerciseProgress = ({ exercise, exerciseHistory, serieCompletate = [], onS
                         {serieCompletate.map((serie, idx) => (
                             <div key={idx} className="text-xs text-gray-600 dark:text-gray-400">
                                 Serie {idx + 1}: {serie.peso}kg × {serie.ripetizioni}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {isExpanded && exerciseHistory && exerciseHistory.length > 0 && (
+                <div className="mb-4 p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Storico esercizio:
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                        {exerciseHistory.slice(0, 3).map((history, idx) => (
+                            <div key={idx} className="bg-white dark:bg-gray-600 p-2 rounded text-xs">
+                                <div className="flex justify-between">
+                                    <span>
+                                        {new Date(history.timestamp).toLocaleDateString()} - {history.peso}kg × {history.ripetizioni}
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
+                        {exerciseHistory.length > 3 && (
+                            <button 
+                                className="text-blue-600 dark:text-blue-400 text-xs"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowHistory(!showHistory);
+                                }}
+                            >
+                                {showHistory ? "Mostra meno" : `Mostra altri ${exerciseHistory.length - 3} risultati...`}
+                            </button>
+                        )}
+                        {showHistory && exerciseHistory.slice(3).map((history, idx) => (
+                            <div key={idx + 3} className="bg-white dark:bg-gray-600 p-2 rounded text-xs">
+                                <div className="flex justify-between">
+                                    <span>
+                                        {new Date(history.timestamp).toLocaleDateString()} - {history.peso}kg × {history.ripetizioni}
+                                    </span>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -160,7 +228,7 @@ const ExerciseProgress = ({ exercise, exerciseHistory, serieCompletate = [], onS
 
             {showTimer ? (
                 <RestTimer 
-                    duration={exercise.tempo_recupero || 90} 
+                    duration={getRecoveryTime ? getRecoveryTime() : (exercise.tempo_recupero || 90)} 
                     onComplete={handleTimerComplete} 
                 />
             ) : (

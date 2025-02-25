@@ -34,8 +34,17 @@ const WorkoutSession = () => {
     useEffect(() => {
         apiRef.current = api;
     }, [api]);
+    // Helper per ottenere il nome del tipo di set
+    const getSetTypeName = useCallback((type) => {
+        switch (type) {
+            case 'superset': return 'Superset';
+            case 'dropset': return 'Drop Set';
+            case 'circuit': return 'Circuito';
+            default: return 'Normale';
+        }
+    }, []);
 
-    // Start timer for elapsed time - Spostata prima di qualsiasi riferimento
+    // Start timer for elapsed time
     const startElapsedTimeTimer = useCallback(() => {
         // Clear any existing timer
         if (timerRef.current) {
@@ -54,10 +63,42 @@ const WorkoutSession = () => {
                selectedWorkout?.esercizi.find(e => e.id === exerciseId)?.serie;
     }, [serieCompletate, selectedWorkout]);
 
+    // Funzione per determinare il tempo di recupero in base al tipo di set
+    const getRecoveryTime = useCallback((exercise) => {
+        if (!exercise) return 90; // Default
+        
+        // Verifica se c'è un esercizio successivo collegato (parte di un superset)
+        const index = selectedWorkout?.esercizi.findIndex(e => e.id === exercise.id);
+        if (index >= 0 && index < selectedWorkout?.esercizi.length - 1) {
+            const nextExercise = selectedWorkout?.esercizi[index + 1];
+            // Se il prossimo esercizio è collegato a questo (superset), non mostrare recupero
+            if (nextExercise && (nextExercise.linked_to_previous === 1 || nextExercise.linked_to_previous === true)) {
+                return 0;
+            }
+        }
+        
+        // Recuperi personalizzati in base al tipo di set
+        switch (exercise.set_type) {
+            case 'dropset':
+                // Recupero più breve per i dropset
+                return Math.min(30, exercise.tempo_recupero || 90);
+            case 'circuit':
+                // Determina se è l'ultimo esercizio del circuito
+                const isLastInCircuit = index >= 0 && 
+                    (index === selectedWorkout?.esercizi.length - 1 || 
+                    selectedWorkout?.esercizi[index + 1].set_type !== 'circuit');
+                
+                return isLastInCircuit ? (exercise.tempo_recupero || 90) : 15;
+            default:
+                return exercise.tempo_recupero || 90;
+        }
+    }, [selectedWorkout]);
+
     // Un esercizio è visibile se:
     // 1. Non è completato, OPPURE
     // 2. È completato ma ha un timer in corso, OPPURE 
     // 3. È completato da poco (entro 2 secondi)
+    // 4. È un superset e l'esercizio collegato non è completato
     const shouldShowExercise = useCallback((exercise) => {
         const exerciseId = exercise.id;
         
@@ -78,10 +119,25 @@ const WorkoutSession = () => {
             return true;
         }
         
+        // Controlli specifici per i tipi di set
+        // Per i superset, mostra finché il successivo non è completato
+        if (exercise.set_type === 'superset') {
+            // Trova l'indice di questo esercizio nella lista
+            const index = selectedWorkout?.esercizi.findIndex(e => e.id === exerciseId);
+            if (index >= 0 && index < selectedWorkout?.esercizi.length - 1) {
+                const nextExercise = selectedWorkout?.esercizi[index + 1];
+                // Se il prossimo esercizio è collegato e non è completato, mostra questo
+                if (nextExercise && 
+                    (nextExercise.linked_to_previous === 1 || nextExercise.linked_to_previous === true) && 
+                    !isExerciseCompleted(nextExercise.id)) {
+                    return true;
+                }
+            }
+        }
+        
         // Altrimenti non mostrarlo
         return false;
-    }, [isExerciseCompleted, lastTimerCompletedAt]);
-
+    }, [isExerciseCompleted, lastTimerCompletedAt, selectedWorkout]);
     // Load exercise history for a specific exercise
     const loadExerciseHistory = useCallback(async (exercise) => {
         if (!exercise?.esercizio_id) return;
@@ -204,7 +260,6 @@ const WorkoutSession = () => {
             console.error('Error cleaning up workout:', err);
         }
     }, [currentAllenamento]);
-
     // Load workouts data
     const loadWorkoutsData = useCallback(async () => {
         try {
@@ -359,7 +414,6 @@ const WorkoutSession = () => {
         // Forza un aggiornamento per riflettere il cambiamento
         setSerieCompletate(prevState => ({...prevState}));
     }, []);
-
     // Complete workout and save duration
     const handleWorkoutComplete = useCallback(async () => {
         if (!currentAllenamento) return;
@@ -480,7 +534,6 @@ const WorkoutSession = () => {
         cleanupWorkout, 
         currentAllenamento
     ]);
-
     if (loading && !isInitialized) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -605,18 +658,33 @@ const WorkoutSession = () => {
                     <div className="space-y-4">
                         {selectedWorkout.esercizi
                             ?.filter(exercise => shouldShowExercise(exercise))
-                            .map(exercise => (
-                                <ExerciseProgress
-                                    key={exercise.id}
-                                    exercise={exercise}
-                                    exerciseHistory={exerciseHistory[exercise.id]}
-                                    serieCompletate={serieCompletate[exercise.id] || []}
-                                    onSerieComplete={(serieData) =>
-                                        handleSerieComplete(exercise.id, serieData)
-                                    }
-                                    onTimerComplete={() => handleExerciseTimerComplete(exercise.id)}
-                                />
-                            ))}
+                            .map((exercise, index) => {
+                                // Determina se questo esercizio è collegato al precedente
+                                const isLinkedToPrevious = exercise.linked_to_previous === 1 || exercise.linked_to_previous === true;
+
+                                return (
+                                    <div key={exercise.id} className="relative">
+                                        {/* Indicatore visivo di collegamento per esercizi linked_to_previous */}
+                                        {isLinkedToPrevious && (
+                                            <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 h-4 border-l-2 border-dashed border-blue-500"></div>
+                                        )}
+                                        
+                                        <ExerciseProgress
+                                            key={exercise.id}
+                                            exercise={exercise}
+                                            exerciseHistory={exerciseHistory[exercise.id]}
+                                            serieCompletate={serieCompletate[exercise.id] || []}
+                                            onSerieComplete={(serieData) =>
+                                                handleSerieComplete(exercise.id, serieData)
+                                            }
+                                            onTimerComplete={() => handleExerciseTimerComplete(exercise.id)}
+                                            getRecoveryTime={() => getRecoveryTime(exercise)}
+                                            setTypeName={getSetTypeName(exercise.set_type)}
+                                            isLinkedToPrevious={isLinkedToPrevious}
+                                        />
+                                    </div>
+                                );
+                            })}
                     </div>
 
                     {/* Summary of completed exercises */}
@@ -634,15 +702,22 @@ const WorkoutSession = () => {
                                     .filter(exercise => !shouldShowExercise(exercise))
                                     .map(exercise => (
                                         <div key={exercise.id} className="flex justify-between items-center p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
-                                            <div>
+                                            <div className="flex items-center gap-2">
                                                 <p className="font-medium text-gray-900 dark:text-white">
                                                     {exercise.nome}
                                                 </p>
+                                                {exercise.set_type !== 'normal' && (
+                                                    <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded-full">
+                                                        {getSetTypeName(exercise.set_type)}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-2">
                                                 <p className="text-sm text-gray-500 dark:text-gray-400">
                                                     {exercise.serie} serie completate
                                                 </p>
+                                                <CheckCircle className="h-5 w-5 text-green-500 dark:text-green-400" />
                                             </div>
-                                            <CheckCircle className="h-5 w-5 text-green-500 dark:text-green-400" />
                                         </div>
                                     ))}
                             </div>

@@ -64,7 +64,8 @@ switch($method) {
                     // Usa prepared statement anche per gli esercizi
                     $stmt = $conn->prepare("
                         SELECT se.*, e.nome, e.descrizione, e.gruppo_muscolare, e.attrezzatura, e.immagine_url,
-                            se.serie, se.ripetizioni, se.peso, se.note, se.tempo_recupero
+                            se.serie, se.ripetizioni, se.peso, se.note, se.tempo_recupero, 
+                            se.set_type, se.linked_to_previous
                         FROM scheda_esercizi se
                         JOIN esercizi e ON se.esercizio_id = e.id
                         WHERE se.scheda_id = ?
@@ -95,7 +96,8 @@ switch($method) {
                     $scheda_id = $scheda['id'];
                     $esercizi_result = $conn->query("
                         SELECT se.*, e.nome, e.descrizione, e.gruppo_muscolare, e.attrezzatura,
-                               se.serie, se.ripetizioni, se.peso, se.note
+                               se.serie, se.ripetizioni, se.peso, se.note, se.tempo_recupero,
+                               se.set_type, se.linked_to_previous
                         FROM scheda_esercizi se
                         JOIN esercizi e ON se.esercizio_id = e.id
                         WHERE se.scheda_id = $scheda_id
@@ -129,6 +131,8 @@ switch($method) {
             $input = file_get_contents("php://input");
             $data = json_decode($input, true);
             
+            debug_log("Dati ricevuti in POST", ["input" => $input]);
+            
             if(!$data) {
                 throw new Exception("Dati non validi: " . json_last_error_msg());
             }
@@ -149,34 +153,63 @@ switch($method) {
             
             // Inserisci gli esercizi della scheda
             if(isset($data['esercizi']) && is_array($data['esercizi'])) {
-                $stmt = $conn->prepare("
-                    INSERT INTO scheda_esercizi 
-                    (scheda_id, esercizio_id, serie, ripetizioni, peso, note, tempo_recupero, ordine) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ");
-                
                 foreach($data['esercizi'] as $index => $esercizio) {
                     if(empty($esercizio['esercizio_id'])) {
                         throw new Exception("ID esercizio mancante per l'elemento in posizione " . $index);
                     }
                     
+                    // Prepara i valori con valori predefiniti per i campi mancanti
                     $tempo_recupero = isset($esercizio['tempo_recupero']) ? $esercizio['tempo_recupero'] : 90;
+                    $note = isset($esercizio['note']) ? $esercizio['note'] : '';
+                    $serie = isset($esercizio['serie']) ? $esercizio['serie'] : 3;
+                    $ripetizioni = isset($esercizio['ripetizioni']) ? $esercizio['ripetizioni'] : 10;
+                    $peso = isset($esercizio['peso']) ? $esercizio['peso'] : 0;
+                    $set_type = isset($esercizio['set_type']) ? $esercizio['set_type'] : 'normal';
+                    $linked_to_previous = isset($esercizio['linked_to_previous']) ? (int)$esercizio['linked_to_previous'] : 0;
+                    
+                    // Assicurati che set_type sia uno dei valori consentiti
+                    if (!in_array($set_type, ['normal', 'superset', 'dropset', 'circuit'])) {
+                        $set_type = 'normal';
+                    }
+                    
+                    // Log di debug
+                    debug_log("Inserimento esercizio", [
+                        "index" => $index,
+                        "esercizio_id" => $esercizio['esercizio_id'],
+                        "set_type" => $set_type,
+                        "linked_to_previous" => $linked_to_previous
+                    ]);
+                    
+                    // Imposta il prepared statement con tutti i parametri
+                    $stmt = $conn->prepare("
+                        INSERT INTO scheda_esercizi 
+                        (scheda_id, esercizio_id, serie, ripetizioni, peso, note, tempo_recupero, set_type, linked_to_previous, ordine) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    
+                    if (!$stmt) {
+                        throw new Exception("Errore nella preparazione della query: " . $conn->error);
+                    }
                     
                     $stmt->bind_param(
-                        "iiiidsii",
+                        "iiiiisssii",
                         $scheda_id,
                         $esercizio['esercizio_id'],
-                        $esercizio['serie'],
-                        $esercizio['ripetizioni'],
-                        $esercizio['peso'],
-                        $esercizio['note'],
+                        $serie,
+                        $ripetizioni,
+                        $peso,
+                        $note,
                         $tempo_recupero,
+                        $set_type,
+                        $linked_to_previous,
                         $index
                     );
                     
                     if(!$stmt->execute()) {
                         throw new Exception("Errore nell'inserimento dell'esercizio: " . $stmt->error);
                     }
+                    
+                    debug_log("Esercizio inserito con successo", ["index" => $index]);
                 }
             }
             
@@ -267,12 +300,6 @@ switch($method) {
             
             // Inserisci i nuovi esercizi
             if (isset($data['esercizi']) && is_array($data['esercizi']) && count($data['esercizi']) > 0) {
-                $stmt = $conn->prepare("
-                    INSERT INTO scheda_esercizi 
-                    (scheda_id, esercizio_id, serie, ripetizioni, peso, note, tempo_recupero, ordine) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ");
-                
                 debug_log("Inserimento nuovi esercizi", ["count" => count($data['esercizi'])]);
                 
                 foreach($data['esercizi'] as $index => $esercizio) {
@@ -280,18 +307,51 @@ switch($method) {
                         throw new Exception("ID esercizio mancante per l'elemento in posizione " . $index);
                     }
                     
+                    // Prepara i valori con valori predefiniti per i campi mancanti
                     $tempo_recupero = isset($esercizio['tempo_recupero']) ? $esercizio['tempo_recupero'] : 90;
+                    $note = isset($esercizio['note']) ? $esercizio['note'] : '';
+                    $serie = isset($esercizio['serie']) ? $esercizio['serie'] : 3;
+                    $ripetizioni = isset($esercizio['ripetizioni']) ? $esercizio['ripetizioni'] : 10;
+                    $peso = isset($esercizio['peso']) ? $esercizio['peso'] : 0;
+                    $set_type = isset($esercizio['set_type']) ? $esercizio['set_type'] : 'normal';
+                    $linked_to_previous = isset($esercizio['linked_to_previous']) ? (int)$esercizio['linked_to_previous'] : 0;
                     $ordine = isset($esercizio['ordine']) ? $esercizio['ordine'] : $index;
                     
+                    // Assicurati che set_type sia uno dei valori consentiti
+                    if (!in_array($set_type, ['normal', 'superset', 'dropset', 'circuit'])) {
+                        $set_type = 'normal';
+                    }
+                    
+                    // Log di debug
+                    debug_log("Inserimento esercizio in PUT", [
+                        "index" => $index,
+                        "esercizio_id" => $esercizio['esercizio_id'],
+                        "set_type" => $set_type,
+                        "linked_to_previous" => $linked_to_previous
+                    ]);
+                    
+                    // Prepared statement per l'inserimento
+                    $stmt = $conn->prepare("
+                        INSERT INTO scheda_esercizi 
+                        (scheda_id, esercizio_id, serie, ripetizioni, peso, note, tempo_recupero, set_type, linked_to_previous, ordine) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    
+                    if (!$stmt) {
+                        throw new Exception("Errore nella preparazione della query: " . $conn->error);
+                    }
+                    
                     $stmt->bind_param(
-                        "iiiidsii",
+                        "iiiiisssii",
                         $scheda_id,
                         $esercizio['esercizio_id'],
-                        $esercizio['serie'],
-                        $esercizio['ripetizioni'],
-                        $esercizio['peso'],
-                        $esercizio['note'],
+                        $serie,
+                        $ripetizioni,
+                        $peso,
+                        $note,
                         $tempo_recupero,
+                        $set_type,
+                        $linked_to_previous,
                         $ordine
                     );
                     
@@ -319,7 +379,8 @@ switch($method) {
             
             // Recupera gli esercizi aggiornati
             $stmt = $conn->prepare("
-                SELECT se.*, e.nome, e.descrizione, e.gruppo_muscolare, e.attrezzatura
+                SELECT se.*, e.nome, e.descrizione, e.gruppo_muscolare, e.attrezzatura,
+                       se.set_type, se.linked_to_previous
                 FROM scheda_esercizi se
                 JOIN esercizi e ON se.esercizio_id = e.id
                 WHERE se.scheda_id = ?

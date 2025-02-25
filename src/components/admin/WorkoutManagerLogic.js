@@ -25,50 +25,51 @@ export const useWorkoutLogic = (api, user, mode, initialWorkout, onClose, onSucc
 
     const fetchWorkoutDetails = useCallback(async (workoutId) => {
         try {
-            console.log(`Fetching workout details for ID: ${workoutId}`);
-            const response = await api.get(`/schede.php?id=${workoutId}`);
+          console.log(`Fetching workout details for ID: ${workoutId}`);
+          const response = await api.get(`/schede.php?id=${workoutId}`);
+          
+          if (response.data) {
+            console.log('Workout data loaded:', response.data);
             
-            if (response.data) {
-                console.log('Workout data loaded:', response.data);
-                
-                // Assicuriamoci che ogni esercizio abbia un tempId univoco e le proprietà corrette
-                const esercizi = (response.data.esercizi || []).map((ex, index) => {
-                    // Mantieni l'ID originale dell'esercizio e aggiungi un id univoco per il frontend
-                    const exerciseData = {
-                        ...ex,
-                        // Mantieni l'ID originale per update
-                        id: ex.id,
-                        // TempId solo per il frontend
-                        tempId: `ex-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
-                        esercizio_id: parseInt(ex.esercizio_id, 10),
-                        serie: parseInt(ex.serie, 10) || 3,
-                        ripetizioni: parseInt(ex.ripetizioni, 10) || 10,
-                        peso: parseFloat(ex.peso) || 0,
-                        tempo_recupero: parseInt(ex.tempo_recupero, 10) || 90,
-                        note: ex.note || '',
-                        set_type: ex.set_type || 'normal',
-                        toUpdate: true // Flag per indicare che è un esercizio esistente da aggiornare
-                    };
-                    
-                    console.log(`Loaded exercise ${index}:`, exerciseData);
-                    return exerciseData;
-                });
-                
-                setWorkoutData({
-                    nome: response.data.nome || '',
-                    descrizione: response.data.descrizione || '',
-                    esercizi: esercizi
-                });
-                
-                console.log('Workout data set:', esercizi.length, 'exercises');
-            }
-            return response.data;
+            // Assicuriamoci che ogni esercizio abbia un tempId univoco e le proprietà corrette
+            const esercizi = (response.data.esercizi || []).map((ex, index) => {
+              // Mantieni l'ID originale dell'esercizio e aggiungi un id univoco per il frontend
+              const exerciseData = {
+                ...ex,
+                // Mantieni l'ID originale per update
+                id: ex.id,
+                // TempId solo per il frontend
+                tempId: `ex-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
+                esercizio_id: parseInt(ex.esercizio_id, 10),
+                serie: parseInt(ex.serie, 10) || 3,
+                ripetizioni: parseInt(ex.ripetizioni, 10) || 10,
+                peso: parseFloat(ex.peso) || 0,
+                tempo_recupero: parseInt(ex.tempo_recupero, 10) || 90,
+                note: ex.note || '',
+                set_type: ex.set_type || 'normal',
+                linked_to_previous: ex.linked_to_previous ? true : false,
+                toUpdate: true // Flag per indicare che è un esercizio esistente da aggiornare
+              };
+              
+              console.log(`Loaded exercise ${index}:`, exerciseData);
+              return exerciseData;
+            });
+            
+            setWorkoutData({
+              nome: response.data.nome || '',
+              descrizione: response.data.descrizione || '',
+              esercizi: esercizi
+            });
+            
+            console.log('Workout data set:', esercizi.length, 'exercises');
+          }
+          return response.data;
         } catch (err) {
-            console.error('Error loading workout details:', err);
-            throw err;
+          console.error('Error loading workout details:', err);
+          throw err;
         }
-    }, [api, setWorkoutData]);
-
+      }, [api, setWorkoutData]);
+      
     // Carica i dati iniziali
     useEffect(() => {
         let mounted = true;
@@ -114,18 +115,23 @@ export const useWorkoutLogic = (api, user, mode, initialWorkout, onClose, onSucc
 
     const handleAddExercise = (exerciseData) => {
         setWorkoutData(prev => ({
-            ...prev,
-            esercizi: [
-                ...prev.esercizi,
-                {
-                    ...exerciseData,
-                    tempId: `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // ID veramente univoco
-                    set_type: 'normal',
-                    linked_to_previous: false
-                }
-            ]
+          ...prev,
+          esercizi: [
+            ...prev.esercizi,
+            {
+              ...exerciseData,
+              tempId: `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              set_type: 'normal', // Imposta il tipo di set predefinito
+              linked_to_previous: false, // Non collegato per default
+              serie: 3, // Valori predefiniti
+              ripetizioni: 10,
+              peso: 0,
+              tempo_recupero: 90,
+              note: ''
+            }
+          ]
         }));
-    };
+      };
 
     const handleRemoveExercise = (index) => {
         console.log(`Removing exercise at index ${index}`);
