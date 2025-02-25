@@ -1,0 +1,10 @@
+{
+  "version": "0.2.1",
+  "tasks": [
+    {
+      "taskLabel": "attivit\u00E0-WorkoutSession",
+      "appliesTo": "src/components/WorkoutSession.jsx",
+      "type": "launch"
+    }
+  ]
+}

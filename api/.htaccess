@@ -1,0 +1,24 @@
+# Abilita CORS
+<IfModule mod_headers.c>
+    # Sempre consentire le richieste OPTIONS
+    SetEnvIf Request_Method "OPTIONS" cors=true
+    Header always set Access-Control-Allow-Origin "http://localhost:3000" env=cors
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" env=cors
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization" env=cors
+    Header always set Access-Control-Max-Age "3600" env=cors
+    
+    # Per le richieste non-OPTIONS
+    Header set Access-Control-Allow-Origin "http://localhost:3000"
+    Header set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header set Access-Control-Allow-Headers "Content-Type, Authorization"
+    
+    # Supporto per Authorization header
+    SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+</IfModule>
+
+# Gestire le richieste OPTIONS separatamente
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteRule ^(.*)$ $1 [R=200,L]
+</IfModule>
