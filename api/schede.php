@@ -145,6 +145,7 @@ switch($method) {
             }
             
             $scheda_id = $stmt->insert_id;
+            debug_log("Creata nuova scheda", ["id" => $scheda_id, "nome" => $data['nome']]);
             
             // Inserisci gli esercizi della scheda
             if(isset($data['esercizi']) && is_array($data['esercizi'])) {
@@ -180,7 +181,15 @@ switch($method) {
             }
             
             $conn->commit();
-            echo json_encode(["id" => $scheda_id]);
+            
+            // Recupera la scheda creata per restituirla
+            $stmt = $conn->prepare("SELECT * FROM schede WHERE id = ?");
+            $stmt->bind_param("i", $scheda_id);
+            $stmt->execute();
+            $scheda = $stmt->get_result()->fetch_assoc();
+            
+            debug_log("Risposta POST", ["scheda" => $scheda]);
+            echo json_encode($scheda);
             
         } catch(Exception $e) {
             $conn->rollback();
@@ -190,7 +199,7 @@ switch($method) {
         }
         break;
 
-case 'PUT':
+    case 'PUT':
         try {
             $input = file_get_contents("php://input");
             debug_log("Dati ricevuti in PUT", ["input" => $input]);
@@ -204,11 +213,23 @@ case 'PUT':
                 throw new Exception("ID mancante");
             }
             
-            $scheda_id = $_GET['id'];
-            debug_log("Aggiornamento scheda", ["id" => $scheda_id]);
+            $scheda_id = (int)$_GET['id'];
+            debug_log("Aggiornamento scheda", ["id" => $scheda_id, "nome" => $data['nome']]);
             
             // Inizia la transazione
             $conn->begin_transaction();
+            
+            // IMPORTANTE: Verifica che la scheda esista
+            $stmt = $conn->prepare("SELECT id FROM schede WHERE id = ?");
+            $stmt->bind_param("i", $scheda_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            if ($result->num_rows === 0) {
+                throw new Exception("Scheda con ID $scheda_id non trovata");
+            }
+            
+            debug_log("Scheda trovata, procedo con l'aggiornamento", ["id" => $scheda_id]);
             
             // Aggiorna i dati base della scheda
             $stmt = $conn->prepare("UPDATE schede SET nome = ?, descrizione = ? WHERE id = ?");
@@ -218,87 +239,77 @@ case 'PUT':
                 throw new Exception("Errore nell'aggiornamento della scheda: " . $stmt->error);
             }
             
-            // Controlla se stiamo aggiornando un singolo esercizio o aggiungendo nuovi esercizi
-            if (isset($data['esercizi']) && is_array($data['esercizi'])) {
-                foreach($data['esercizi'] as $esercizio) {
-                    if (isset($esercizio['id'])) {
-                        if (isset($esercizio['toDelete']) && $esercizio['toDelete']) {
-                            // Rimozione dell'esercizio
-                            $stmt = $conn->prepare("DELETE FROM scheda_esercizi WHERE id = ? AND scheda_id = ?");
-                            $stmt->bind_param("ii", $esercizio['id'], $scheda_id);
-                            
-                            if (!$stmt->execute()) {
-                                throw new Exception("Errore nella rimozione dell'esercizio: " . $stmt->error);
-                            }
-
-                            // Aggiorna l'ordine degli esercizi rimanenti
-                            $stmt = $conn->prepare("
-                                UPDATE scheda_esercizi 
-                                SET ordine = ordine - 1 
-                                WHERE scheda_id = ? AND ordine > ?
-                            ");
-                            $stmt->bind_param("ii", $scheda_id, $esercizio['ordine']);
-                            
-                            if (!$stmt->execute()) {
-                                throw new Exception("Errore nell'aggiornamento dell'ordine degli esercizi: " . $stmt->error);
-                            }
-                        } else {
-                            // Aggiornamento di un esercizio esistente
-                            $stmt = $conn->prepare("
-                                UPDATE scheda_esercizi 
-                                SET note = ?, peso = ?, serie = ?, ripetizioni = ?, tempo_recupero = ?
-                                WHERE id = ? AND scheda_id = ?
-                            ");
-                            
-                            $tempo_recupero = isset($esercizio['tempo_recupero']) ? $esercizio['tempo_recupero'] : 90;
-                            
-                            $stmt->bind_param(
-                                "sdiiiii",
-                                $esercizio['note'],
-                                $esercizio['peso'],
-                                $esercizio['serie'],
-                                $esercizio['ripetizioni'],
-                                $tempo_recupero,
-                                $esercizio['id'],
-                                $scheda_id
-                            );
-                            
-                            if (!$stmt->execute()) {
-                                throw new Exception("Errore nell'aggiornamento dell'esercizio: " . $stmt->error);
-                            }
-                        }
-                    } else {
-                        // Inserimento di un nuovo esercizio
-                        $stmt = $conn->prepare("
-                            INSERT INTO scheda_esercizi 
-                            (scheda_id, esercizio_id, serie, ripetizioni, peso, note, tempo_recupero, ordine) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ");
-                        
-                        $tempo_recupero = isset($esercizio['tempo_recupero']) ? $esercizio['tempo_recupero'] : 90;
-                        $ordine = isset($esercizio['ordine']) ? $esercizio['ordine'] : 0;
-                        
-                        $stmt->bind_param(
-                            "iiiidsii",
-                            $scheda_id,
-                            $esercizio['esercizio_id'],
-                            $esercizio['serie'],
-                            $esercizio['ripetizioni'],
-                            $esercizio['peso'],
-                            $esercizio['note'],
-                            $tempo_recupero,
-                            $ordine
-                        );
-                        
-                        if (!$stmt->execute()) {
-                            throw new Exception("Errore nell'inserimento del nuovo esercizio: " . $stmt->error);
-                        }
+            debug_log("Aggiornamento dati base completato", ["affected_rows" => $stmt->affected_rows]);
+            
+            // Dopo aver aggiornato i dati base della scheda
+            if ($stmt->affected_rows === 0) {
+                debug_log("Attenzione: nessuna riga aggiornata", ["scheda_id" => $scheda_id]);
+                // Verifica se l'ID esiste ancora
+                $verify = $conn->prepare("SELECT id FROM schede WHERE id = ?");
+                $verify->bind_param("i", $scheda_id);
+                $verify->execute();
+                $exists = $verify->get_result()->num_rows > 0;
+                
+                if (!$exists) {
+                    throw new Exception("La scheda con ID $scheda_id non esiste più dopo l'aggiornamento");
+                }
+            }
+            
+            // Elimina tutti gli esercizi esistenti della scheda
+            $stmt = $conn->prepare("DELETE FROM scheda_esercizi WHERE scheda_id = ?");
+            $stmt->bind_param("i", $scheda_id);
+            
+            if (!$stmt->execute()) {
+                throw new Exception("Errore nell'eliminazione degli esercizi esistenti: " . $stmt->error);
+            }
+            
+            debug_log("Esercizi esistenti eliminati", ["scheda_id" => $scheda_id]);
+            
+            // Inserisci i nuovi esercizi
+            if (isset($data['esercizi']) && is_array($data['esercizi']) && count($data['esercizi']) > 0) {
+                $stmt = $conn->prepare("
+                    INSERT INTO scheda_esercizi 
+                    (scheda_id, esercizio_id, serie, ripetizioni, peso, note, tempo_recupero, ordine) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                
+                debug_log("Inserimento nuovi esercizi", ["count" => count($data['esercizi'])]);
+                
+                foreach($data['esercizi'] as $index => $esercizio) {
+                    if(empty($esercizio['esercizio_id'])) {
+                        throw new Exception("ID esercizio mancante per l'elemento in posizione " . $index);
                     }
+                    
+                    $tempo_recupero = isset($esercizio['tempo_recupero']) ? $esercizio['tempo_recupero'] : 90;
+                    $ordine = isset($esercizio['ordine']) ? $esercizio['ordine'] : $index;
+                    
+                    $stmt->bind_param(
+                        "iiiidsii",
+                        $scheda_id,
+                        $esercizio['esercizio_id'],
+                        $esercizio['serie'],
+                        $esercizio['ripetizioni'],
+                        $esercizio['peso'],
+                        $esercizio['note'],
+                        $tempo_recupero,
+                        $ordine
+                    );
+                    
+                    if(!$stmt->execute()) {
+                        throw new Exception("Errore nell'inserimento dell'esercizio: " . $stmt->error);
+                    }
+                    
+                    debug_log("Esercizio inserito", [
+                        "index" => $index, 
+                        "esercizio_id" => $esercizio['esercizio_id'],
+                        "scheda_id" => $scheda_id
+                    ]);
                 }
             }
             
             // Commit della transazione
             $conn->commit();
+            debug_log("Transazione completata con successo", ["scheda_id" => $scheda_id]);
             
             // Recupera la scheda aggiornata per restituirla
             $stmt = $conn->prepare("SELECT * FROM schede WHERE id = ?");
@@ -319,12 +330,13 @@ case 'PUT':
             $result = $stmt->get_result();
             
             $esercizi = array();
-            while($row = $result->fetch_assoc()) { // Rimosso get_result() che causava errore
+            while($row = $result->fetch_assoc()) {
                 $esercizi[] = $row;
             }
             
             $scheda['esercizi'] = $esercizi;
             
+            debug_log("Risposta PUT", ["scheda_id" => $scheda['id'], "num_esercizi" => count($esercizi)]);
             echo json_encode($scheda);
             
         } catch (Exception $e) {
@@ -347,7 +359,51 @@ case 'PUT':
             // Inizia la transazione
             $conn->begin_transaction();
             
-            // Elimina prima gli esercizi della scheda
+            // Controlla se ci sono riferimenti alle assegnazioni utente
+            $stmt = $conn->prepare("SELECT COUNT(*) as count FROM user_workout_assignments WHERE scheda_id = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $result = $stmt->get_result()->fetch_assoc();
+            
+            if ($result['count'] > 0) {
+                debug_log("Eliminazione assegnazioni utente", ["count" => $result['count']]);
+                // Elimina prima le assegnazioni utente
+                $stmt = $conn->prepare("DELETE FROM user_workout_assignments WHERE scheda_id = ?");
+                $stmt->bind_param("i", $id);
+                
+                if(!$stmt->execute()) {
+                    throw new Exception("Errore nell'eliminazione delle assegnazioni utente");
+                }
+            }
+            
+            // Controlla se ci sono allenamenti collegati a questa scheda
+            $stmt = $conn->prepare("SELECT COUNT(*) as count FROM allenamenti WHERE scheda_id = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $result = $stmt->get_result()->fetch_assoc();
+            
+            if ($result['count'] > 0) {
+                debug_log("Eliminazione allenamenti collegati", ["count" => $result['count']]);
+                // Elimina prima gli allenamenti collegati
+                $stmt = $conn->prepare("
+                    DELETE FROM serie_completate 
+                    WHERE allenamento_id IN (SELECT id FROM allenamenti WHERE scheda_id = ?)
+                ");
+                $stmt->bind_param("i", $id);
+                
+                if(!$stmt->execute()) {
+                    throw new Exception("Errore nell'eliminazione delle serie completate");
+                }
+                
+                $stmt = $conn->prepare("DELETE FROM allenamenti WHERE scheda_id = ?");
+                $stmt->bind_param("i", $id);
+                
+                if(!$stmt->execute()) {
+                    throw new Exception("Errore nell'eliminazione degli allenamenti");
+                }
+            }
+            
+            // Elimina gli esercizi della scheda
             $stmt = $conn->prepare("DELETE FROM scheda_esercizi WHERE scheda_id = ?");
             $stmt->bind_param("i", $id);
             
@@ -355,13 +411,17 @@ case 'PUT':
                 throw new Exception("Errore nell'eliminazione degli esercizi");
             }
             
-            // Poi elimina la scheda
+            debug_log("Esercizi eliminati", ["scheda_id" => $id]);
+            
+            // Infine elimina la scheda
             $stmt = $conn->prepare("DELETE FROM schede WHERE id = ?");
             $stmt->bind_param("i", $id);
             
             if(!$stmt->execute()) {
                 throw new Exception("Errore nell'eliminazione della scheda");
             }
+            
+            debug_log("Scheda eliminata", ["id" => $id]);
             
             // Commit della transazione
             $conn->commit();

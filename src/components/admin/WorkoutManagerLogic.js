@@ -208,6 +208,24 @@ export const useWorkoutLogic = (api, user, mode, initialWorkout, onClose, onSucc
         }));
     };
 
+    // Funzione di debug per monitorare le richieste HTTP
+    const debugRequest = async (url, method, data = null) => {
+        console.log(`${method} request to ${url}`);
+        if (data) console.log("Request data:", data);
+        
+        let response;
+        if (method === 'PUT') {
+            response = await api.put(url, data);
+        } else if (method === 'POST') {
+            response = await api.post(url, data);
+        } else if (method === 'DELETE') {
+            response = await api.delete(url);
+        }
+        
+        console.log("Response:", response);
+        return response;
+    };
+
     const handleSubmit = async (e) => {
         if (e) {
             e.preventDefault();
@@ -216,10 +234,11 @@ export const useWorkoutLogic = (api, user, mode, initialWorkout, onClose, onSucc
         
         if (saving) return;
     
-        // Debug
-        console.log("Starting submit process...");
-        console.log("Current workout data:", workoutData);
-        console.log("Exercises count:", workoutData.esercizi.length);
+        console.log("=== SUBMIT DEBUG ===");
+        console.log("Mode:", mode);
+        console.log("Initial Workout:", initialWorkout);
+        console.log("Workout Data:", workoutData);
+        console.log("=== END DEBUG ===");
     
         try {
             setSaving(true);
@@ -234,114 +253,123 @@ export const useWorkoutLogic = (api, user, mode, initialWorkout, onClose, onSucc
                 throw new Error('Aggiungi almeno un esercizio alla scheda');
             }
     
-            // Preparare i dati per l'invio
-            const prepareExerciseData = (ex) => {
-                const baseData = {
-                    esercizio_id: parseInt(ex.esercizio_id, 10),
-                    serie: parseInt(ex.serie, 10) || 3,
-                    ripetizioni: parseInt(ex.ripetizioni, 10) || 10,
-                    peso: parseFloat(ex.peso) || 0,
-                    tempo_recupero: parseInt(ex.tempo_recupero, 10) || 90,
-                    note: ex.note || '',
-                    set_type: ex.set_type || 'normal',
-                };
-                
-                // Per gli esercizi esistenti, includi l'ID originale
-                if (ex.id && ex.toUpdate) {
-                    return {
-                        ...baseData,
-                        id: ex.id  // ID originale per l'aggiornamento
+            // Prepara gli esercizi, filtrando quelli contrassegnati per l'eliminazione
+            const esercizi = workoutData.esercizi
+                .filter(ex => !ex.toDelete)
+                .map((ex, index) => {
+                    // Dati di base per ogni esercizio
+                    const baseData = {
+                        esercizio_id: parseInt(ex.esercizio_id, 10),
+                        serie: parseInt(ex.serie, 10) || 3,
+                        ripetizioni: parseInt(ex.ripetizioni, 10) || 10,
+                        peso: parseFloat(ex.peso) || 0,
+                        tempo_recupero: parseInt(ex.tempo_recupero, 10) || 90,
+                        note: ex.note || '',
+                        set_type: ex.set_type || 'normal',
+                        ordine: index  // Importante: assicura l'ordine corretto
                     };
-                }
-                
-                // Per i nuovi esercizi, non includere l'ID
-                return baseData;
-            };
+                    
+                    // Non includiamo l'ID dell'esercizio nella scheda per l'aggiornamento
+                    // Server gestirà delete e insert invece di update
+                    
+                    return baseData;
+                });
     
+            // Dati completi da inviare
             const dataToSend = {
-                ...workoutData,
-                esercizi: workoutData.esercizi.map(prepareExerciseData)
+                nome: workoutData.nome,
+                descrizione: workoutData.descrizione || '',
+                esercizi: esercizi
             };
     
             console.log('Sending data to server:', dataToSend);
     
             let response;
             if (mode === 'edit' && initialWorkout?.scheda_id) {
+                const url = `/schede.php?id=${initialWorkout.scheda_id}`;
                 console.log(`Updating workout with ID: ${initialWorkout.scheda_id}`);
-                response = await api.put(`/schede.php?id=${initialWorkout.scheda_id}`, dataToSend);
+                response = await debugRequest(url, 'PUT', dataToSend);
             } else {
                 console.log('Creating new workout');
-                response = await api.post('/schede.php', dataToSend);
+                response = await debugRequest('/schede.php', 'POST', dataToSend);
             }
     
             console.log('Server response:', response);
     
             if (response.data) {
                 // Per nuove schede, assegna all'utente
-                if (mode === 'new' || !initialWorkout) {
+                if (mode === 'new') {
                     console.log(`Assigning workout to user ${user.id}`);
                     await api.post('/user_assignments.php', {
                         user_id: user.id,
                         scheda_id: response.data.id,
                         active: 1
                     });
+                } else {
+                    console.log('Skipping assignment creation for edit mode');
                 }
     
                 if (onSuccess) onSuccess(response.data);
-                onClose();
                 
-                // Forza il ricaricamento della pagina
-                console.log('Reloading page...');
-                window.location.reload();
+                // Chiudi e ricarica con un breve ritardo
+                onClose();
+                setTimeout(() => {
+                    window.location.reload();
+                }, 300);
             }
         } catch (err) {
             console.error('Error saving workout:', err);
             setError(err.response?.data?.error || err.message || 'Errore durante il salvataggio della scheda');
+        } finally {
             setSaving(false);
         }
     };
 
-const handleDelete = useCallback(async () => {
-    if (!initialWorkout) return;
-    
-    try {
-        setSaving(true);
-        setError(null);
-
-        console.log("Deleting workout:", initialWorkout);
+    const handleDelete = useCallback(async () => {
+        if (!initialWorkout) return;
         
-        // Conferma esplicita prima dell'eliminazione
-        const confirmDelete = window.confirm('Sei sicuro di voler eliminare questa scheda?');
-        if (!confirmDelete) {
+        try {
+            setSaving(true);
+            setError(null);
+
+            console.log("Deleting workout:", initialWorkout);
+            
+            // Conferma esplicita prima dell'eliminazione
+            const confirmDelete = window.confirm('Sei sicuro di voler eliminare questa scheda?');
+            if (!confirmDelete) {
+                setSaving(false);
+                return;
+            }
+
+            // Verifica che abbiamo tutti i dati necessari
+            if (!initialWorkout.id) {
+                throw new Error('ID assegnazione mancante');
+            }
+
+            // Prima elimina l'assegnazione
+            console.log(`Deleting assignment with ID: ${initialWorkout.id}`);
+            await debugRequest(`/user_assignments.php?id=${initialWorkout.id}`, 'DELETE');
+            
+            console.log("Assignment deletion successful");
+            
+            // Non eliminiamo più la scheda stessa, solo l'assegnazione
+            // Questo evita problemi con altre assegnazioni della stessa scheda
+            
+            // Notifica il successo e chiudi
+            if (onSuccess) onSuccess();
+            onClose();
+            
+            // Forza il ricaricamento della pagina dopo un breve ritardo
+            setTimeout(() => {
+                window.location.reload();
+            }, 300);
+        } catch (err) {
+            console.error('Error deleting workout:', err);
+            setError(err.response?.data?.error || err.message || 'Errore durante l\'eliminazione della scheda');
+        } finally {
             setSaving(false);
-            return; // Interrompe se l'utente annulla
         }
-
-        // Prima elimina l'assegnazione
-        console.log(`Deleting assignment with ID: ${initialWorkout.id}`);
-        await api.delete(`/user_assignments.php?id=${initialWorkout.id}`);
-        
-        // Poi elimina la scheda
-        if (initialWorkout.scheda_id) {
-            console.log(`Deleting workout with ID: ${initialWorkout.scheda_id}`);
-            await api.delete(`/schede.php?id=${initialWorkout.scheda_id}`);
-        }
-
-        console.log("Deletion successful");
-        
-        // Chiudi senza richiamare onSuccess per evitare l'apertura di una nuova finestra
-        onClose();
-        
-        // Forza il ricaricamento della pagina
-        console.log('Reloading page...');
-        window.location.reload();
-    } catch (err) {
-        console.error('Error deleting workout:', err);
-        setError(err.response?.data?.error || 'Errore durante l\'eliminazione della scheda');
-    } finally {
-        setSaving(false);
-    }
-}, [api, initialWorkout, onClose]);
+    }, [api, initialWorkout, onClose, onSuccess, debugRequest]);
 
     return {
         availableExercises,
