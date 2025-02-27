@@ -115,7 +115,7 @@ const WorkoutSession = () => {
         // Se è stato appena completato (entro 2 secondi), mostralo
         const now = Date.now();
         if (completedExercisesRef.current.has(exerciseId) && 
-            now - lastTimerCompletedAt < 2000) {
+            now - lastTimerCompletedAt < 1) {
             return true;
         }
         
@@ -413,6 +413,10 @@ const WorkoutSession = () => {
         
         // Forza un aggiornamento per riflettere il cambiamento
         setSerieCompletate(prevState => ({...prevState}));
+
+        setTimeout(() => {
+            setSerieCompletate(prevState => ({...prevState}));
+        }, 1);
     }, []);
     // Complete workout and save duration
     const handleWorkoutComplete = useCallback(async () => {
